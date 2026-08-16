@@ -1,0 +1,35 @@
+:root { font-family: "Noto Sans JP","Yu Gothic",system-ui,sans-serif; }
+* { box-sizing: border-box; }
+body { margin:0; min-height:100vh; background:#111318; color:#edf0f7; }
+.container { width:min(960px,calc(100% - 32px)); margin:0 auto; padding:56px 0 80px; }
+header { margin-bottom:32px; }
+.eyebrow { margin:0 0 8px; font-size:.78rem; font-weight:800; letter-spacing:.18em; color:#9da9ff; }
+h1 { margin:0; font-size:clamp(2rem,5vw,3.4rem); }
+.lead { color:#b9c0cf; }
+form,.panel { padding:24px; border:1px solid #303745; border-radius:18px; background:#191d25; box-shadow:0 20px 60px rgb(0 0 0 / .22); }
+.grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+label { display:block; margin-bottom:8px; font-weight:700; }
+select,textarea,button { width:100%; font:inherit; }
+select,textarea { border:1px solid #414a5c; border-radius:10px; background:#101319; color:#edf0f7; }
+select { padding:12px; margin-bottom:22px; }
+textarea { min-height:340px; padding:16px; resize:vertical; line-height:1.7; }
+textarea:focus,select:focus { outline:2px solid #8390ff; outline-offset:2px; }
+.label-row,.result-header { display:flex; justify-content:space-between; gap:16px; align-items:baseline; }
+#char-count,.result-header span,.model-label,.action-message { color:#9ca5b5; font-size:.86rem; }
+button { padding:14px 18px; border:0; border-radius:11px; cursor:pointer; font-weight:900; }
+.primary { margin-top:18px; background:#8390ff; color:#0c0e13; }
+.secondary { background:#2a3040; color:#edf0f7; border:1px solid #485168; }
+button:hover { filter:brightness(1.08); }
+.panel { margin-top:24px; }
+.panel h2 { margin:0 0 6px; }
+pre { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; line-height:1.75; }
+.error { border-color:#9d4351; background:#27181d; }
+.result { border-color:#475174; }
+.actions { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:22px; }
+.action-message { min-height:1.4em; margin:10px 0 0; }
+@media (max-width:600px) {
+  .container { width:min(100% - 20px,960px); padding-top:28px; }
+  form,.panel { padding:18px; border-radius:14px; }
+  .grid,.actions { grid-template-columns:1fr; }
+  .label-row,.result-header { display:block; }
+}

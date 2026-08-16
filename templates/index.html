@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ローカル要約</title>
+<link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+</head>
+<body>
+<main class="container">
+<header>
+<p class="eyebrow">LOCAL LLM TOOL</p>
+<h1>ローカル要約</h1>
+<p class="lead">文章をPC内のOllamaへ送り、ローカルだけで要約します。</p>
+</header>
+
+<form action="/summarize" method="post">
+<div class="grid">
+<div>
+<label for="model">モデル</label>
+<select id="model" name="model">
+{% for model_id, model_name in available_models.items() %}
+<option value="{{ model_id }}" {% if model == model_id %}selected{% endif %}>{{ model_name }}</option>
+{% endfor %}
+</select>
+</div>
+<div>
+<label for="strictness">要約の厳密さ</label>
+<select id="strictness" name="strictness">
+<option value="strict" {% if strictness == "strict" %}selected{% endif %}>原文忠実</option>
+<option value="normal" {% if strictness == "normal" %}selected{% endif %}>通常</option>
+<option value="helpful" {% if strictness == "helpful" %}selected{% endif %}>補足あり</option>
+</select>
+</div>
+</div>
+
+<label for="summary_type">要約形式</label>
+<select id="summary_type" name="summary_type">
+<option value="standard" {% if summary_type == "standard" %}selected{% endif %}>標準要約</option>
+<option value="technical" {% if summary_type == "technical" %}selected{% endif %}>技術メモ</option>
+<option value="meeting" {% if summary_type == "meeting" %}selected{% endif %}>会議メモ</option>
+<option value="short" {% if summary_type == "short" %}selected{% endif %}>短縮要約</option>
+</select>
+
+<div class="label-row">
+<label for="text">文章</label>
+<span id="char-count">0 / {{ "{:,}".format(max_input_chars) }}文字</span>
+</div>
+<textarea id="text" name="text" maxlength="{{ max_input_chars }}" placeholder="ここに文章を貼り付けてください" required>{{ text }}</textarea>
+<button type="submit" class="primary">要約する</button>
+</form>
+
+{% if error %}
+<section class="panel error"><h2>エラー</h2><pre>{{ error }}</pre></section>
+{% endif %}
+
+{% if result %}
+<section class="panel result">
+<div class="result-header">
+<div>
+<h2>要約結果</h2>
+<p class="model-label">{{ model }} / {{ strictness }}</p>
+</div>
+{% if metrics %}
+<span>{{ metrics.total_seconds }}秒{% if metrics.tokens_per_second %} · {{ metrics.tokens_per_second }} token/s{% endif %}</span>
+{% endif %}
+</div>
+<pre id="summary-result">{{ result }}</pre>
+<div class="actions">
+<button type="button" class="secondary" id="copy-button">結果をコピー</button>
+<button type="button" class="secondary" id="save-button">Markdown保存</button>
+</div>
+<p id="action-message" class="action-message"></p>
+</section>
+{% endif %}
+</main>
+
+<script>
+const textarea = document.getElementById("text");
+const counter = document.getElementById("char-count");
+const maxChars = {{ max_input_chars }};
+
+function updateCount() {
+  counter.textContent = `${textarea.value.length.toLocaleString()} / ${maxChars.toLocaleString()}文字`;
+}
+textarea.addEventListener("input", updateCount);
+updateCount();
+
+const result = document.getElementById("summary-result");
+const copyBtn = document.getElementById("copy-button");
+const saveBtn = document.getElementById("save-button");
+const msg = document.getElementById("action-message");
+
+if (copyBtn && result) {
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(result.textContent);
+      msg.textContent = "要約結果をコピーしました。";
+    } catch {
+      msg.textContent = "コピーに失敗しました。";
+    }
+  });
+}
+
+if (saveBtn && result) {
+  saveBtn.addEventListener("click", () => {
+    const d = new Date();
+    const stamp =
+      d.getFullYear()
+      + String(d.getMonth()+1).padStart(2,"0")
+      + String(d.getDate()).padStart(2,"0")
+      + "_"
+      + String(d.getHours()).padStart(2,"0")
+      + String(d.getMinutes()).padStart(2,"0")
+      + String(d.getSeconds()).padStart(2,"0");
+
+    const model = document.getElementById("model").value;
+    const type = document.getElementById("summary_type").value;
+    const strictness = document.getElementById("strictness").value;
+
+    const md = [
+      "# ローカル要約",
+      "",
+      `- Model: ${model}`,
+      `- Summary type: ${type}`,
+      `- Strictness: ${strictness}`,
+      "",
+      "## 要約結果",
+      "",
+      result.textContent,
+      "",
+      "## 原文",
+      "",
+      textarea.value,
+      ""
+    ].join("\n");
+
+    const blob = new Blob([md], {type:"text/markdown;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `summary_${stamp}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    msg.textContent = "Markdownファイルを保存しました。";
+  });
+}
+</script>
+</body>
+</html>
