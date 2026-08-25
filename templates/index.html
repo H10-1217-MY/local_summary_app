@@ -8,60 +8,101 @@
 </head>
 <body>
 <main class="container">
+
 <header>
     <p class="eyebrow">LOCAL LLM TOOL</p>
     <h1>ローカル要約</h1>
-    <p class="lead">テキストまたはPDFを、PC内のOllamaだけで要約します。</p>
+    <p class="lead">
+        テキスト・PDF・画像をローカル環境で読み取り、Ollamaで要約します。
+    </p>
 </header>
 
 <form action="/summarize" method="post" enctype="multipart/form-data">
+
     <div class="grid">
         <div>
             <label for="model">モデル</label>
             <select id="model" name="model">
                 {% for model_id, model_name in available_models.items() %}
-                <option value="{{ model_id }}" {% if model == model_id %}selected{% endif %}>
+                <option
+                    value="{{ model_id }}"
+                    {% if model == model_id %}selected{% endif %}
+                >
                     {{ model_name }}
                 </option>
                 {% endfor %}
             </select>
         </div>
+
         <div>
             <label for="strictness">要約の厳密さ</label>
             <select id="strictness" name="strictness">
-                <option value="strict" {% if strictness == "strict" %}selected{% endif %}>原文忠実</option>
-                <option value="normal" {% if strictness == "normal" %}selected{% endif %}>通常</option>
-                <option value="helpful" {% if strictness == "helpful" %}selected{% endif %}>補足あり</option>
+                <option value="strict" {% if strictness == "strict" %}selected{% endif %}>
+                    原文忠実
+                </option>
+                <option value="normal" {% if strictness == "normal" %}selected{% endif %}>
+                    通常
+                </option>
+                <option value="helpful" {% if strictness == "helpful" %}selected{% endif %}>
+                    補足あり
+                </option>
             </select>
         </div>
     </div>
 
     <label for="summary_type">要約形式</label>
     <select id="summary_type" name="summary_type">
-        <option value="standard" {% if summary_type == "standard" %}selected{% endif %}>標準要約</option>
-        <option value="technical" {% if summary_type == "technical" %}selected{% endif %}>技術メモ</option>
-        <option value="meeting" {% if summary_type == "meeting" %}selected{% endif %}>会議メモ</option>
-        <option value="short" {% if summary_type == "short" %}selected{% endif %}>短縮要約</option>
+        <option value="standard" {% if summary_type == "standard" %}selected{% endif %}>
+            標準要約
+        </option>
+        <option value="technical" {% if summary_type == "technical" %}selected{% endif %}>
+            技術メモ
+        </option>
+        <option value="meeting" {% if summary_type == "meeting" %}selected{% endif %}>
+            会議メモ
+        </option>
+        <option value="short" {% if summary_type == "short" %}selected{% endif %}>
+            短縮要約
+        </option>
     </select>
 
     <section class="input-section">
         <div class="section-title-row">
             <div>
-                <h2>PDF</h2>
-                <p>文字情報を持つPDFを直接読み取れます。</p>
+                <h2>PDF / 画像</h2>
+                <p>
+                    PDFは文字抽出を優先し、必要な場合だけOCRへ自動切替します。
+                </p>
             </div>
-            <span class="badge">v3</span>
+            <span class="badge">v4 OCR</span>
         </div>
 
-        <label class="file-box" for="pdf_file">
-            <strong>PDFを選択</strong>
-            <span>最大 {{ max_pdf_mb }}MB / {{ max_pdf_pages }}ページ</span>
-            <input id="pdf_file" name="pdf_file" type="file" accept=".pdf,application/pdf">
+        <label class="file-box" for="source_file">
+            <strong id="file-name">PDFまたは画像を選択</strong>
+            <span id="file-info">
+                PDF {{ max_pdf_mb }}MB / 画像 {{ max_image_mb }}MB まで
+            </span>
+            <input
+                id="source_file"
+                name="source_file"
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif,.jp2,.bmp,.webp,application/pdf,image/*"
+            >
         </label>
 
+        <div class="ocr-status {% if ocr_available %}ok{% else %}ng{% endif %}">
+            <strong>NDLOCR-Lite</strong>
+            {% if ocr_available %}
+                <span>利用可能 / {{ ocr_device }}</span>
+            {% else %}
+                <span>コマンドを検出できません</span>
+            {% endif %}
+        </div>
+
         <p class="hint">
-            PDFを選択した場合は、下の文章欄よりPDF本文を優先します。
-            スキャンPDF・画像PDFは次のOCR対応版で処理します。
+            文字情報を持つPDFはPyMuPDFで直接抽出します。
+            スキャンPDFと画像はNDLOCR-LiteでOCRします。
+            アップロードファイルは一時領域で処理し、処理後に削除します。
         </p>
     </section>
 
@@ -69,12 +110,22 @@
 
     <div class="label-row">
         <label for="text">文章を直接入力</label>
-        <span id="char-count">0 / {{ "{:,}".format(max_input_chars) }}文字</span>
+        <span id="char-count">
+            0 / {{ "{:,}".format(max_input_chars) }}文字
+        </span>
     </div>
 
-    <textarea id="text" name="text" maxlength="{{ max_input_chars }}" placeholder="ここに文章を貼り付けるか、上でPDFを選択してください">{{ text }}</textarea>
+    <textarea
+        id="text"
+        name="text"
+        maxlength="{{ max_input_chars }}"
+        placeholder="ここに文章を貼り付けるか、上でPDF・画像を選択してください"
+    >{{ text }}</textarea>
 
-    <button type="submit" class="primary">要約する</button>
+    <button type="submit" class="primary">
+        読み取り・要約する
+    </button>
+
 </form>
 
 {% if error %}
@@ -86,37 +137,83 @@
 
 {% if result %}
 <section class="panel result">
+
     <div class="result-header">
         <div>
             <h2>要約結果</h2>
-            <p class="model-label">{{ model }} / {{ strictness }}</p>
+            <p class="model-label">
+                {{ model }} / {{ strictness }}
+            </p>
         </div>
+
         {% if metrics %}
         <span>
-            {{ metrics.total_seconds }}秒
-            {% if metrics.tokens_per_second %} · {{ metrics.tokens_per_second }} token/s{% endif %}
+            LLM {{ metrics.total_seconds }}秒
+            {% if metrics.tokens_per_second %}
+            · {{ metrics.tokens_per_second }} token/s
+            {% endif %}
         </span>
         {% endif %}
     </div>
 
     {% if source %}
     <div class="source-info">
-        <strong>{% if source.kind == "pdf" %}PDF{% else %}TEXT{% endif %}</strong>
+        <strong>
+            {% if source.kind == "pdf" %}
+                PDF
+            {% elif source.kind == "image" %}
+                IMAGE
+            {% else %}
+                TEXT
+            {% endif %}
+        </strong>
+
         <span>{{ source.name }}</span>
-        {% if source.pages %}<span>{{ source.pages }}ページ</span>{% endif %}
+        <span>{{ source.method }}</span>
+
+        {% if source.pages %}
+        <span>{{ source.pages }}ページ</span>
+        {% endif %}
+
         <span>{{ "{:,}".format(source.chars) }}文字</span>
+
+        {% if source.ocr_seconds is not none %}
+        <span>OCR {{ source.ocr_seconds }}秒</span>
+        {% endif %}
     </div>
+
+    {% if source.warning %}
+    <div class="warning">
+        {{ source.warning }}
+    </div>
+    {% endif %}
     {% endif %}
 
     <pre id="summary-result">{{ result }}</pre>
 
     <div class="actions">
-        <button type="button" class="secondary" id="copy-button">結果をコピー</button>
-        <button type="button" class="secondary" id="save-button">Markdown保存</button>
+        <button
+            type="button"
+            class="secondary"
+            id="copy-button"
+        >
+            結果をコピー
+        </button>
+
+        <button
+            type="button"
+            class="secondary"
+            id="save-button"
+        >
+            Markdown保存
+        </button>
     </div>
+
     <p id="action-message" class="action-message"></p>
+
 </section>
 {% endif %}
+
 </main>
 
 <script>
@@ -125,19 +222,29 @@ const counter = document.getElementById("char-count");
 const maxChars = {{ max_input_chars }};
 
 function updateCount() {
-    counter.textContent = `${textarea.value.length.toLocaleString()} / ${maxChars.toLocaleString()}文字`;
+    counter.textContent =
+        `${textarea.value.length.toLocaleString()} / ${maxChars.toLocaleString()}文字`;
 }
+
 textarea.addEventListener("input", updateCount);
 updateCount();
 
-const fileInput = document.getElementById("pdf_file");
-const fileBox = document.querySelector(".file-box");
-if (fileInput && fileBox) {
+const fileInput = document.getElementById("source_file");
+const fileName = document.getElementById("file-name");
+const fileInfo = document.getElementById("file-info");
+
+if (fileInput) {
     fileInput.addEventListener("change", () => {
         const file = fileInput.files[0];
-        if (!file) return;
-        fileBox.querySelector("strong").textContent = file.name;
-        fileBox.querySelector("span").textContent = `${(file.size / 1024 / 1024).toFixed(2)} MB`;
+
+        if (!file) {
+            fileName.textContent = "PDFまたは画像を選択";
+            return;
+        }
+
+        fileName.textContent = file.name;
+        fileInfo.textContent =
+            `${(file.size / 1024 / 1024).toFixed(2)} MB`;
     });
 }
 
@@ -160,7 +267,9 @@ if (copyBtn && result) {
 if (saveBtn && result) {
     saveBtn.addEventListener("click", () => {
         const d = new Date();
-        const stamp = d.getFullYear()
+
+        const stamp =
+            d.getFullYear()
             + String(d.getMonth() + 1).padStart(2, "0")
             + String(d.getDate()).padStart(2, "0")
             + "_"
@@ -183,24 +292,34 @@ if (saveBtn && result) {
             "",
             result.textContent,
             "",
-            "## 原文",
+            "## 読み取り本文",
             "",
             textarea.value,
             ""
         ].join("\n");
 
-        const blob = new Blob([md], {type: "text/markdown;charset=utf-8"});
+        const blob = new Blob(
+            [md],
+            {type: "text/markdown;charset=utf-8"}
+        );
+
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
+
         a.href = url;
         a.download = `summary_${stamp}.md`;
+
         document.body.appendChild(a);
         a.click();
         a.remove();
+
         URL.revokeObjectURL(url);
-        msg.textContent = "Markdownファイルを保存しました。";
+
+        msg.textContent =
+            "Markdownファイルを保存しました。";
     });
 }
 </script>
+
 </body>
 </html>
