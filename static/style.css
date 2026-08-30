@@ -346,3 +346,27 @@ pre {
         margin-top: 4px;
     }
 }
+
+
+.processing-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 18px;
+    padding: 10px 12px;
+    border: 1px solid #3b4458;
+    border-radius: 10px;
+    background: #141821;
+}
+
+.processing-info > * {
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: #202638;
+    color: #b9c0cf;
+    font-size: .78rem;
+}
+
+.processing-info strong {
+    color: #c7ccff;
+}

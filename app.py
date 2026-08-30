@@ -26,6 +26,11 @@ NDLOCR_DEVICE = os.getenv("NDLOCR_DEVICE", "cpu")
 NDLOCR_TIMEOUT_SECONDS = int(os.getenv("NDLOCR_TIMEOUT_SECONDS", "1800"))
 
 MAX_INPUT_CHARS = 30_000
+LONG_SUMMARY_THRESHOLD_CHARS = 24_000
+CHUNK_TARGET_CHARS = 12_000
+CHUNK_OVERLAP_CHARS = 800
+MAX_DOCUMENT_CHARS = 300_000
+MAX_REDUCE_INPUT_CHARS = 24_000
 MAX_PDF_BYTES = 25 * 1024 * 1024
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_PDF_PAGES = 100
@@ -51,36 +56,125 @@ AVAILABLE_MODELS = {
     "qwen3:14b": "Qwen3 14B（品質重視）",
 }
 
+SOURCE_FIDELITY_RULES = """【情報源の制約】
+- この処理は入力文書の要約です。
+- モデル自身の外部知識を、入力文書の事実として使用しないでください。
+- 有名な作品・人物・制度だと推測できても、入力に明示されていない作者名、作品名、背景、年代、思想、評価などを補完しないでください。
+- 入力に書かれていない情報は「記載なし」と扱ってください。
+- 入力とモデル知識が食い違って見えても、モデル知識で訂正しないでください。
+- 固有名詞、数値、日付、役職などは入力された表記を優先してください。
+- 文学的解釈、批評、歴史的背景は、入力本文に明示されている場合を除き追加しないでください。
+- 「ご希望があれば」「必要であれば」などの追加提案を書かないでください。
+""".strip()
+
 SUMMARY_INSTRUCTIONS = {
-    "standard": """次の文章を要約してください。
+    "standard": "一般文書として内容を整理してください。",
+    "technical": "技術文書・作業メモとして、実施内容、仕様、結果、問題点を重視して整理してください。",
+    "meeting": "会議・打ち合わせ記録として、議題、決定事項、保留事項、担当者、期限を重視して整理してください。",
+    "story": "物語・小説として、登場人物、出来事、時系列、転換点、結末を本文だけから整理してください。作者・作品背景・文学史・象徴・思想などの外部知識や独自解釈は追加しないでください。",
+}
 
-出力形式:
-1. 3行要約
-2. 重要事項
-3. 未解決点
-4. 次にやること""",
-    "technical": """次の技術文書または作業メモを整理してください。
+SUMMARY_LENGTH_INSTRUCTIONS = {
+    "concise": "【要約の長さ: 簡潔】重要度の高い内容だけを残し、細部や重複を省いて大きく圧縮してください。",
+    "standard": "【要約の長さ: 標準】主要な内容を落とさず、背景・条件・出来事・結論を適度に残してください。",
+    "detailed": "【要約の長さ: 詳細】元文書の構造や主要な論点・出来事をできるだけ保持し、重要な節、条件、数値、人物関係、時系列、変更点などを省略しすぎないでください。",
+}
 
-出力形式:
+
+def summary_output_format(summary_type: str, summary_length: str) -> str:
+    if summary_type == "story":
+        if summary_length == "concise":
+            return """出力形式:
+1. 短いあらすじ
+2. 主な登場人物
+3. 結末・到達点"""
+        if summary_length == "detailed":
+            return """出力形式:
+1. 全体あらすじ
+2. 主な登場人物と本文中で明示された関係
+3. 物語の展開
+   - 序盤
+   - 中盤
+   - 終盤
+4. 主要な出来事・転換点
+5. 登場人物の状態や立場の変化
+6. 結末
+7. 本文中で未解決のまま残る点"""
+        return """出力形式:
+1. あらすじ
+2. 主な登場人物
+3. 主要な出来事
+4. 物語の流れ・転換点
+5. 結末"""
+
+    if summary_type == "technical":
+        if summary_length == "concise":
+            return """出力形式:
+1. 概要
+2. 重要な技術事項
+3. 問題点・結論"""
+        if summary_length == "detailed":
+            return """出力形式:
+1. 全体概要
+2. 背景・目的
+3. 使用した技術・手法
+4. 仕様・条件・重要な数値
+5. 実施内容・結果
+6. 問題点・リスク
+7. 未確認事項
+8. 結論・次に行う作業"""
+        return """出力形式:
 1. 概要
 2. 実施内容・確認結果
-3. 問題点・リスク
-4. 未確認事項
-5. 次に行う作業""",
-    "meeting": """次の会議メモを整理してください。
+3. 技術・仕様上の重要事項
+4. 問題点・リスク
+5. 未確認事項
+6. 次に行う作業"""
 
-出力形式:
-1. 会議の要旨
+    if summary_type == "meeting":
+        if summary_length == "concise":
+            return """出力形式:
+1. 会議要旨
 2. 決定事項
-3. 保留事項
-4. 担当者と期限
-5. 次回までの対応""",
-    "short": """次の文章を簡潔に要約してください。
+3. 次の対応"""
+        if summary_length == "detailed":
+            return """出力形式:
+1. 会議全体の要旨
+2. 議題ごとの内容
+3. 決定事項
+4. 保留・未解決事項
+5. 担当者
+6. 期限
+7. 次回までの対応
+8. 発言や方針の変更があればその経緯"""
+        return """出力形式:
+1. 会議の要旨
+2. 主な議題
+3. 決定事項
+4. 保留事項
+5. 担当者と期限
+6. 次回までの対応"""
 
-出力形式:
-- 100文字程度の要約
-- 重要なキーワード 3〜5個""",
-}
+    if summary_length == "concise":
+        return """出力形式:
+1. 3行要約
+2. 重要事項（3〜5点）"""
+    if summary_length == "detailed":
+        return """出力形式:
+1. 全体概要
+2. 主要トピック・セクション別要約
+3. 重要事項
+4. 数値・条件・固有名詞
+5. 結論・到達点
+6. 未解決点
+7. 次にやること（原文に明示されている場合のみ）"""
+    return """出力形式:
+1. 概要
+2. 重要事項
+3. 主要な論点・内容
+4. 未解決点
+5. 次にやること（原文に明示されている場合のみ）"""
+
 
 STRICTNESS_INSTRUCTIONS = {
     "strict": """【原文忠実モード】
@@ -101,7 +195,7 @@ STRICTNESS_INSTRUCTIONS = {
 - 指定された出力形式を基本構造として維持してください。""",
 }
 
-app = FastAPI(title="Local Summary App v4")
+app = FastAPI(title="Local Summary App v0.5.2")
 
 app.mount(
     "/static",
@@ -121,6 +215,7 @@ def empty_context() -> dict[str, Any]:
     return {
         "text": "",
         "summary_type": "standard",
+        "summary_length": "standard",
         "strictness": "strict",
         "model": default_model(),
         "result": "",
@@ -134,6 +229,9 @@ def empty_context() -> dict[str, Any]:
         "available_models": AVAILABLE_MODELS,
         "ocr_available": ndlocr_available(),
         "ocr_device": NDLOCR_DEVICE,
+        "long_summary_support": True,
+        "long_summary_threshold_chars": LONG_SUMMARY_THRESHOLD_CHARS,
+        "max_document_chars": MAX_DOCUMENT_CHARS,
     }
 
 
@@ -408,9 +506,343 @@ def run_ndlocr(
     return normalized, elapsed
 
 
+
+def split_long_text(
+    text: str,
+    target_chars: int = CHUNK_TARGET_CHARS,
+    overlap_chars: int = CHUNK_OVERLAP_CHARS,
+) -> list[str]:
+    """段落・ページ境界を優先して長文を分割する。"""
+    text = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    units: list[str] = []
+
+    for paragraph in paragraphs:
+        if len(paragraph) <= target_chars:
+            units.append(paragraph)
+            continue
+
+        start = 0
+        while start < len(paragraph):
+            end = min(start + target_chars, len(paragraph))
+
+            if end < len(paragraph):
+                candidates = [
+                    paragraph.rfind(mark, start, end)
+                    for mark in ("。", "！", "？", "\n")
+                ]
+                best = max(candidates)
+                if best > start + target_chars // 2:
+                    end = best + 1
+
+            units.append(paragraph[start:end].strip())
+            start = end
+
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    for unit in units:
+        extra = len(unit) + (2 if current else 0)
+
+        if current and current_len + extra > target_chars:
+            previous = "\n\n".join(current)
+            chunks.append(previous.strip())
+
+            current = []
+            current_len = 0
+
+            if overlap_chars > 0:
+                overlap = previous[-overlap_chars:].strip()
+                if overlap:
+                    context = "[前チャンク末尾の参考文脈]\n" + overlap
+                    current.append(context)
+                    current_len = len(context)
+
+        current.append(unit)
+        current_len += len(unit) + (2 if len(current) > 1 else 0)
+
+    if current:
+        chunks.append("\n\n".join(current).strip())
+
+    return [chunk for chunk in chunks if chunk]
+
+
+async def call_ollama_text(
+    messages: list[dict[str, str]],
+    model: str,
+    temperature: float = 0.1,
+) -> str:
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "think": False,
+        "keep_alive": "10m",
+        "options": {"temperature": temperature},
+    }
+
+    timeout = httpx.Timeout(
+        connect=5.0,
+        read=600.0,
+        write=30.0,
+        pool=5.0,
+    )
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            f"{OLLAMA_BASE_URL}/api/chat",
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+    result = str(data.get("message", {}).get("content", "")).strip()
+
+    if not result:
+        raise RuntimeError("Ollamaから空の回答が返されました。")
+
+    return result
+
+
+async def summarize_chunk(
+    text: str,
+    index: int,
+    total: int,
+    model: str,
+    strictness: str,
+    is_ocr: bool,
+    summary_type: str = "standard",
+) -> str:
+    ocr_note = ""
+    if is_ocr:
+        ocr_note = (
+            "この本文はOCR由来です。誤認識の可能性があるため、"
+            "固有名詞や数値を文脈だけで勝手に修正しないでください。"
+        )
+
+    prompt = f"""
+{SOURCE_FIDELITY_RULES}
+
+{STRICTNESS_INSTRUCTIONS[strictness]}
+
+{ocr_note}
+
+これは全{total}チャンク中の{index}番目です。
+
+文書タイプ: {summary_type}
+{"物語・小説の場合は、人物、場所、出来事、時系列、関係、状態変化、転換点を特に保持してください。作者や作品背景は本文に明示されている場合のみ記録してください。" if summary_type == "story" else ""}
+
+ここでは読みやすい要約文を作らず、
+後段の統合処理で使用する「事実台帳」を作成してください。
+明示がない項目は必ず「記載なし」としてください。
+
+出力形式:
+
+[主題・場面]
+- ...
+
+[明示された作品名・文書名]
+- ...
+
+[明示された作者・作成者・出典]
+- ...
+
+[人物・組織・対象]
+- ...
+
+[場所・舞台]
+- ...
+
+[人物関係・状態変化]
+- ...
+
+[出来事・事実]
+- ...
+
+[数値・日付・条件・制約]
+- ...
+
+[決定事項]
+- ...
+
+[未決定・未確認事項]
+- ...
+
+[次にやること]
+- ...
+
+[時系列・変更履歴]
+- ...
+
+[原文上で不明瞭な点]
+- ...
+
+重要:
+- 入力にない作者名・作品名・背景知識を推測しない。
+- 有名作品だと分かってもモデル自身の知識を使わない。
+- 前チャンク末尾の参考文脈は重複確認用であり二重計上しない。
+- 解釈・感想・批評を書かない。
+- 挨拶や追加提案を書かない。
+
+本文:
+{text}
+""".strip()
+
+    return await call_ollama_text(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "あなたは長文要約の事実抽出担当です。"
+                    "外部知識を使わず、入力本文に明示された情報だけを台帳化してください。"
+                    "不足情報を推測で埋めることは禁止です。"
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        model,
+        0.0,
+    )
+
+
+async def reduce_summaries(
+    summaries: list[str],
+    summary_type: str,
+    summary_length: str,
+    strictness: str,
+    model: str,
+) -> str:
+    combined = "\n\n".join(
+        f"--- Fact Ledger {i} ---\n{summary}"
+        for i, summary in enumerate(summaries, start=1)
+    )
+
+    if len(combined) > MAX_REDUCE_INPUT_CHARS:
+        groups = split_long_text(
+            combined,
+            target_chars=MAX_REDUCE_INPUT_CHARS,
+            overlap_chars=0,
+        )
+
+        reduced: list[str] = []
+        for i, group in enumerate(groups, start=1):
+            reduced.append(
+                await summarize_chunk(
+                    group,
+                    i,
+                    len(groups),
+                    model,
+                    strictness,
+                    False,
+                    summary_type,
+                )
+            )
+
+        return await reduce_summaries(
+            reduced,
+            summary_type,
+            summary_length,
+            strictness,
+            model,
+        )
+
+    prompt = (
+        SOURCE_FIDELITY_RULES
+        + "\n\n"
+        + STRICTNESS_INSTRUCTIONS[strictness]
+        + "\n\n"
+        + SUMMARY_INSTRUCTIONS[summary_type]
+        + "\n\n"
+        + SUMMARY_LENGTH_INSTRUCTIONS[summary_length]
+        + "\n\n"
+        + summary_output_format(summary_type, summary_length)
+        + """
+
+以下は同じ文書を分割して作成した「事実台帳」です。
+最終要約は、この台帳に書かれている内容だけを材料にしてください。
+
+統合ルール:
+- モデル自身の作品・人物・歴史・制度などの知識を使用しない。
+- 作者名や作品名は、台帳に明示されている場合のみ書く。
+- 「記載なし」の情報を推測で埋めない。
+- 固有名詞や数値が台帳間で食い違う場合、勝手に正解を選ばず不一致として扱う。
+- 重複は1つにまとめる。
+- 後半で変更・撤回されたことが明示されている場合は、最終状態が分かるように整理する。
+- 文学作品でも、テーマ・象徴・作者思想を独自に追加しない。
+- 挨拶や「ご希望があれば」等の提案を書かない。
+
+事実台帳:
+"""
+        + combined
+    )
+
+    return await call_ollama_text(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "あなたは長文文書の最終要約担当です。"
+                    "与えられた事実台帳以外の知識を使用してはいけません。"
+                    "不足情報は不足したまま保持してください。"
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        model,
+        0.0 if strictness == "strict" else 0.1,
+    )
+
+
+async def summarize_long_document(
+    text: str,
+    summary_type: str,
+    summary_length: str,
+    strictness: str,
+    model: str,
+    is_ocr: bool,
+) -> tuple[str, dict[str, Any]]:
+    started = time.perf_counter()
+    chunks = split_long_text(text)
+
+    chunk_summaries: list[str] = []
+
+    for index, chunk in enumerate(chunks, start=1):
+        chunk_summaries.append(
+            await summarize_chunk(
+                chunk,
+                index,
+                len(chunks),
+                model,
+                strictness,
+                is_ocr,
+                summary_type,
+            )
+        )
+
+    result = await reduce_summaries(
+        chunk_summaries,
+        summary_type,
+        summary_length,
+        strictness,
+        model,
+    )
+
+    return result, {
+        "total_seconds": round(time.perf_counter() - started, 2),
+        "prompt_tokens": None,
+        "output_tokens": None,
+        "tokens_per_second": None,
+        "long_summary": True,
+        "chunk_count": len(chunks),
+        "input_chars": len(text),
+    }
+
+
 async def summarize_with_ollama(
     text: str,
     summary_type: str,
+    summary_length: str,
     strictness: str,
     model: str,
     is_ocr: bool,
@@ -439,11 +871,17 @@ async def summarize_with_ollama(
             {
                 "role": "user",
                 "content": (
-                    STRICTNESS_INSTRUCTIONS[strictness]
+                    SOURCE_FIDELITY_RULES
+                    + "\n\n"
+                    + STRICTNESS_INSTRUCTIONS[strictness]
                     + "\n\n"
                     + ocr_note
                     + "\n"
                     + SUMMARY_INSTRUCTIONS[summary_type]
+                    + "\n\n"
+                    + SUMMARY_LENGTH_INSTRUCTIONS[summary_length]
+                    + "\n\n"
+                    + summary_output_format(summary_type, summary_length)
                     + "\n\n対象文章:\n"
                     + text
                 ),
@@ -516,6 +954,7 @@ async def summarize(
     request: Request,
     text: str = Form(""),
     summary_type: str = Form("standard"),
+    summary_length: str = Form("standard"),
     strictness: str = Form("strict"),
     model: str = Form("qwen3:14b"),
     source_file: UploadFile | None = File(None),
@@ -525,6 +964,7 @@ async def summarize(
         {
             "text": text,
             "summary_type": summary_type,
+            "summary_length": summary_length,
             "strictness": strictness,
             "model": model,
         }
@@ -532,6 +972,9 @@ async def summarize(
 
     if summary_type not in SUMMARY_INSTRUCTIONS:
         context["error"] = "不明な要約形式が指定されました。"
+
+    elif summary_length not in SUMMARY_LENGTH_INSTRUCTIONS:
+        context["error"] = "不明な要約の長さが指定されました。"
 
     elif strictness not in STRICTNESS_INSTRUCTIONS:
         context["error"] = "不明な厳密さ設定が指定されました。"
@@ -688,20 +1131,33 @@ async def summarize(
                     "文章を入力するか、PDFまたは画像ファイルを選択してください。"
                 )
 
-            if len(input_text) > MAX_INPUT_CHARS:
+            if len(input_text) > MAX_DOCUMENT_CHARS:
                 raise ValueError(
                     f"{len(input_text):,}文字を取得しましたが、"
-                    f"現在の要約上限は{MAX_INPUT_CHARS:,}文字です。"
-                    "長文分割要約は次の拡張で対応予定です。"
+                    f"現在の文書上限は{MAX_DOCUMENT_CHARS:,}文字です。"
                 )
 
-            result, metrics = await summarize_with_ollama(
-                input_text,
-                summary_type,
-                strictness,
-                model,
-                source["is_ocr"],
-            )
+            if len(input_text) > LONG_SUMMARY_THRESHOLD_CHARS:
+                result, metrics = await summarize_long_document(
+                    input_text,
+                    summary_type,
+                    summary_length,
+                    strictness,
+                    model,
+                    source["is_ocr"],
+                )
+            else:
+                result, metrics = await summarize_with_ollama(
+                    input_text,
+                    summary_type,
+                    summary_length,
+                    strictness,
+                    model,
+                    source["is_ocr"],
+                )
+                metrics["long_summary"] = False
+                metrics["chunk_count"] = 1
+                metrics["input_chars"] = len(input_text)
 
             context["result"] = result
             context["metrics"] = metrics

@@ -61,8 +61,21 @@
         <option value="meeting" {% if summary_type == "meeting" %}selected{% endif %}>
             会議メモ
         </option>
-        <option value="short" {% if summary_type == "short" %}selected{% endif %}>
-            短縮要約
+        <option value="story" {% if summary_type == "story" %}selected{% endif %}>
+            物語・小説
+        </option>
+    </select>
+
+    <label for="summary_length">要約の長さ</label>
+    <select id="summary_length" name="summary_length">
+        <option value="concise" {% if summary_length == "concise" %}selected{% endif %}>
+            簡潔
+        </option>
+        <option value="standard" {% if summary_length == "standard" %}selected{% endif %}>
+            標準
+        </option>
+        <option value="detailed" {% if summary_length == "detailed" %}selected{% endif %}>
+            詳細
         </option>
     </select>
 
@@ -111,14 +124,14 @@
     <div class="label-row">
         <label for="text">文章を直接入力</label>
         <span id="char-count">
-            0 / {{ "{:,}".format(max_input_chars) }}文字
+            0文字
         </span>
     </div>
 
     <textarea
         id="text"
         name="text"
-        maxlength="{{ max_input_chars }}"
+        
         placeholder="ここに文章を貼り付けるか、上でPDF・画像を選択してください"
     >{{ text }}</textarea>
 
@@ -142,14 +155,16 @@
         <div>
             <h2>要約結果</h2>
             <p class="model-label">
-                {{ model }} / {{ strictness }}
+                {{ model }} / {{ strictness }} / {{ summary_length }}
             </p>
         </div>
 
         {% if metrics %}
         <span>
-            LLM {{ metrics.total_seconds }}秒
-            {% if metrics.tokens_per_second %}
+            {{ metrics.total_seconds }}秒
+            {% if metrics.long_summary %}
+            · {{ metrics.chunk_count }} chunks
+            {% elif metrics.tokens_per_second %}
             · {{ metrics.tokens_per_second }} token/s
             {% endif %}
         </span>
@@ -189,6 +204,21 @@
     {% endif %}
     {% endif %}
 
+    {% if metrics %}
+    <div class="processing-info">
+        {% if metrics.long_summary %}
+        <strong>LONG DOCUMENT</strong>
+        <span>{{ "{:,}".format(metrics.input_chars) }}文字</span>
+        <span>{{ metrics.chunk_count }} chunks</span>
+        <span>階層要約</span>
+        {% else %}
+        <strong>STANDARD</strong>
+        <span>{{ "{:,}".format(metrics.input_chars) }}文字</span>
+        <span>1 request</span>
+        {% endif %}
+    </div>
+    {% endif %}
+
     <pre id="summary-result">{{ result }}</pre>
 
     <div class="actions">
@@ -219,11 +249,9 @@
 <script>
 const textarea = document.getElementById("text");
 const counter = document.getElementById("char-count");
-const maxChars = {{ max_input_chars }};
-
 function updateCount() {
     counter.textContent =
-        `${textarea.value.length.toLocaleString()} / ${maxChars.toLocaleString()}文字`;
+        `${textarea.value.length.toLocaleString()}文字`;
 }
 
 textarea.addEventListener("input", updateCount);
@@ -280,6 +308,7 @@ if (saveBtn && result) {
         const model = document.getElementById("model").value;
         const type = document.getElementById("summary_type").value;
         const strictness = document.getElementById("strictness").value;
+        const summaryLength = document.getElementById("summary_length").value;
 
         const md = [
             "# ローカル要約",
@@ -287,6 +316,7 @@ if (saveBtn && result) {
             `- Model: ${model}`,
             `- Summary type: ${type}`,
             `- Strictness: ${strictness}`,
+            `- Summary length: ${summaryLength}`,
             "",
             "## 要約結果",
             "",
