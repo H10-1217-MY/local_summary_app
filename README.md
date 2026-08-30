@@ -1,121 +1,267 @@
 # Local Summary App
 
-Ollama + Qwen3を使う、ローカル日本語要約Webアプリです。
+Ollama + Qwen3 + PyMuPDF + NDLOCR-Lite を使用した、**ローカル環境で動作する日本語文書要約Webアプリ**です。
 
-## v4
+テキスト、PDF、スキャンPDF、画像を入力し、必要に応じてOCRを行ったうえで、ローカルLLMによる要約を生成します。
 
-PDFと画像のOCR入力に対応しました。
+外部の生成AI APIへ文書を送信せず、PC内で処理を完結させることを目的としています。
 
-### 入力
+---
 
-- テキスト直接入力
-- PDF
-- JPG / JPEG
-- PNG
-- TIFF / TIF
-- JP2
-- BMP
-- WebP
+## Features
 
-### 読み取りフロー
+* テキストの直接入力
+* PDFからのテキスト抽出
+* スキャンPDFのOCR
+* 画像ファイルのOCR
+* Qwen3 8B / 14B の切り替え
+* 要約形式の切り替え
+* 要約の厳密さの切り替え
+* 要約結果のコピー
+* Markdown形式での保存
+* OCR処理時間、LLM生成時間、token/s の表示
+
+### 対応する要約形式
+
+* 標準要約
+* 技術メモ
+* 会議メモ
+* 短縮要約
+
+### 要約の厳密さ
+
+* **原文忠実**
+
+  * 入力文に書かれている内容を中心に要約
+  * 原文にない情報をなるべく補わない
+
+* **通常**
+
+  * 読みやすさを重視して整理
+
+* **補足あり**
+
+  * 原文の要約に加え、必要に応じて補足や提案を追加
+
+---
+
+## Screenshot
+
+<!-- 公開用スクリーンショットを追加する場合は以下のように配置できます。
+
+![Local Summary App](docs/images/screenshot.png)
+
+-->
+
+---
+
+## Processing Flow
 
 ```text
-PDF
-├─ PyMuPDFで十分な文字を抽出できる
-│  └─ そのまま要約
-│
-└─ 文字をほとんど抽出できない
-   └─ NDLOCR-Lite
-      └─ OCRテキスト
-         └─ 要約
-
-画像
-└─ NDLOCR-Lite
-   └─ OCRテキスト
-      └─ 要約
+Text
+  │
+  └─────────────────────────────┐
+                                │
+PDF                             │
+  │                             │
+  ├─ PyMuPDFで文字抽出          │
+  │        │                    │
+  │        ├─ 十分取得できる ───┤
+  │        │                    │
+  │        └─ 十分取得できない  │
+  │                  │          │
+  │             NDLOCR-Lite     │
+  │                  │          │
+  └──────────────────┤          │
+                     │          │
+Image                │          │
+  │                  │          │
+NDLOCR-Lite ─────────┘          │
+                                │
+                                ▼
+                         共通テキスト
+                                │
+                                ▼
+                          Ollama / Qwen3
+                                │
+                                ▼
+                              要約
 ```
 
-## 前提
+PDFにテキスト情報が含まれている場合は、PyMuPDFによる直接抽出を優先します。
 
-### Ollama
+十分なテキストを取得できないスキャンPDFや画像については、NDLOCR-Liteを使用してOCRを行います。
 
-```bash
-ollama list
-systemctl status ollama --no-pager
-```
+---
 
-例:
+## Supported Input
+
+### Text
+
+ブラウザ上の入力欄へ直接文章を貼り付けられます。
+
+### PDF
+
+* 通常のテキストPDF
+* スキャンPDF
+
+### Image
+
+以下の形式に対応しています。
+
+* JPG / JPEG
+* PNG
+* TIFF / TIF
+* JP2
+* BMP
+* WebP
+
+---
+
+## Requirements
+
+動作確認環境の例:
+
+* Ubuntu 24.04
+* Python 3.11
+* Ollama
+* Qwen3 8B / 14B
+* NDLOCR-Lite
+
+GPUはLLM推論に使用できます。
+
+NDLOCR-LiteはCPUでも動作します。
+
+---
+
+## Installation
+
+### 1. Ollama
+
+Ollamaをインストールしてください。
+
+インストール後、使用するモデルを取得します。
 
 ```bash
 ollama pull qwen3:8b
 ollama pull qwen3:14b
 ```
 
-### NDLOCR-Lite
-
-NDLOCR-Liteは要約アプリのPython環境とは分離してCLIとして利用します。
+確認:
 
 ```bash
+ollama list
+```
+
+Ollamaサービスの確認:
+
+```bash
+systemctl status ollama --no-pager
+```
+
+---
+
+### 2. NDLOCR-Lite
+
+OCRには、国立国会図書館が公開している **NDLOCR-Lite** を使用します。
+
+```bash
+cd ~/projects
+
 git clone https://github.com/ndl-lab/ndlocr-lite.git
+
 cd ndlocr-lite
+
 uv tool install .
 ```
 
-確認:
+インストール確認:
 
 ```bash
 ndlocr-lite --help
 ```
 
-v4はPATH上の `ndlocr-lite` を自動検出します。
+NDLOCR-LiteはLocal Summary AppのPython環境とは分離し、CLIツールとして利用します。
 
-## local-summary環境
+---
+
+### 3. Local Summary App
+
+リポジトリを取得します。
 
 ```bash
+git clone https://github.com/H10-1217-MY/local_summary_app.git
+
+cd local_summary_app
+```
+
+Condaを使用する場合:
+
+```bash
+conda create -n local-summary python=3.11 -y
+
 conda activate local-summary
+
 pip install -r requirements.txt
 ```
 
-## 起動
+すでに環境を作成している場合:
+
+```bash
+conda activate local-summary
+
+pip install -r requirements.txt
+```
+
+---
+
+## Run
+
+アプリを起動します。
 
 ```bash
 uvicorn app:app --reload
 ```
 
-ブラウザ:
+ブラウザで以下を開きます。
 
 ```text
 http://127.0.0.1:8000
 ```
 
-## 確認
+---
+
+## Health Check
 
 ```bash
 curl http://127.0.0.1:8000/health
 ```
 
-OCRが認識されていれば:
+NDLOCR-Liteが正常に認識されている場合、以下のような情報が返ります。
 
 ```json
 {
+  "status": "ok",
+  "pdf_support": true,
+  "image_support": true,
   "ocr_support": true,
   "ocr_engine": "NDLOCR-Lite",
   "ocr_device": "cpu"
 }
 ```
 
-のように表示されます。
+---
 
-## 環境変数
+## Environment Variables
 
-Ollama:
+### Ollama
 
 ```bash
 export OLLAMA_BASE_URL=http://127.0.0.1:11434
 export OLLAMA_MODEL=qwen3:14b
 ```
 
-NDLOCR-Lite:
+### NDLOCR-Lite
 
 ```bash
 export NDLOCR_COMMAND=ndlocr-lite
@@ -123,36 +269,27 @@ export NDLOCR_DEVICE=cpu
 export NDLOCR_TIMEOUT_SECONDS=1800
 ```
 
-## v4の仕様
+---
 
-- PDF最大25MB
-- 画像最大20MB
-- PDF最大100ページ
-- LLMへ投入する本文は最大30,000文字
-- PDFはまずPyMuPDFで文字抽出
-- 文字量が少ないPDFだけNDLOCR-Liteへ自動フォールバック
-- 画像はNDLOCR-LiteでOCR
-- OCR処理は一時ディレクトリで実行
-- アップロードされた原本は永続保存しない
-- OCR本文は軽い改行整理のみを行う
-- OCR誤認識そのものをアプリ側で推測修正しない
+## Current Limits
 
-## NDLOCR-Liteについて
+現在は以下の制限を設けています。
 
-OCRには国立国会図書館が公開する NDLOCR-Lite を利用します。
+* PDF: 最大25MB
+* 画像: 最大20MB
+* PDF: 最大100ページ
+* LLMへ投入する文章: 最大30,000文字
 
-- Repository: https://github.com/ndl-lab/ndlocr-lite
-- License: CC BY 4.0
+30,000文字を超える文書の分割要約は、今後対応予定です。
 
-NDLOCR-Lite本体とその依存ライブラリのライセンスについては、
-NDLOCR-Lite公式リポジトリを確認してください。
+---
 
-## 今後
+## Privacy
 
 - 長文PDFの分割要約
 - Markdownレンダリング
 - 音声 / 動画文字起こし
-- kotoba-whisper系の統合
+- kotoba-whisper系の統合HEAD
 - 履歴 / 検索
 
 
